@@ -1,148 +1,151 @@
 # ESP32 LoRa Reliable Link
 
-Reliable point-to-point LoRa communication using **ESP32 + SX1276**, with a lightweight application-layer protocol based on:
+Reliable point-to-point LoRa communication using **ESP32 + SX1276**, implementing a lightweight application-layer protocol with **ACK, CRC16 and sequence control**.
 
-- packet sequence number
-- CRC16 integrity check
-- ACK confirmation
-- duplicate packet detection
-- retransmission logic
-
-This repository is part of a larger smart beehive IoT project, where one ESP32 acts as the **sensor node** and another ESP32 acts as the **gateway**.
+This project is part of a distributed IoT architecture for a **smart beehive monitoring system**, where a sensor node communicates with a gateway via LoRa.
 
 ---
 
-## Project Overview
+## 📡 Overview
 
-The objective of this project is to validate a **robust bidirectional LoRa link** between two ESP32 devices using SX1276 transceivers.
+This repository demonstrates a **robust bidirectional LoRa communication system**, solving common issues such as:
 
-### Architecture
+- packet loss
+- data corruption
+- unreliable delivery
+- lack of confirmation
 
-- **TX Node (`tx-node/`)**
-  - Simulates the beehive node
-  - Sends structured LoRa packets
-  - Waits for ACK confirmation
-  - Retransmits if confirmation is not received
-
-- **RX Gateway (`rx-gateway/`)**
-  - Receives and validates packets
-  - Sends ACK back to the transmitter
-  - Detects duplicate packets
-  - Prevents duplicated processing
+A custom protocol was implemented to guarantee **data integrity and delivery confirmation**.
 
 ---
 
-## Communication Strategy
+## 🧠 Key Features
 
-The system uses a lightweight reliable protocol over LoRa.
-
-### DATA packet structure
-
-- Magic byte
-- Protocol version
-- Message type
-- Node ID
-- Sequence number
-- Payload length
-- Payload
-- CRC16
-
-### ACK packet structure
-
-- Magic byte
-- Protocol version
-- Message type
-- Gateway ID
-- Sequence number
-- Status
-- CRC16
+- Reliable communication over LoRa
+- ACK-based confirmation system
+- CRC16 integrity verification
+- Sequence-based packet control
+- Duplicate packet detection
+- Automatic retransmission (retry logic)
+- Clean modular TX/RX architecture
 
 ---
 
-## Reliability Features
+## 🏗️ System Architecture
 
-- **Sequence control**: each DATA packet has a sequence number
-- **CRC16-CCITT**: packet integrity verification at application layer
-- **ACK confirmation**: receiver confirms successful reception
-- **Retransmission**: sender retries if ACK is not received
-- **Duplicate detection**: receiver identifies repeated packets and avoids reprocessing
+[ TX Node (ESP32) ] ---> LoRa ---> [ RX Gateway (ESP32) ]
+│ │
+Sensor data ACK + validation
 
----
+### TX Node
+- Sends structured packets
+- Waits for ACK
+- Retries on failure
 
-## Hardware Used
-
-- 2x ESP32 boards
-- 2x SX1276 LoRa modules / onboard LoRa ESP32 boards
-- PlatformIO
-- RadioLib library
-
----
-
-## LoRa Configuration
-
-Validated configuration:
-
-- **Frequency:** 915 MHz
-- **Bandwidth:** 500 kHz
-- **Spreading Factor:** 7
-- **Coding Rate:** 4/5
-- **Output Power:** 2 dBm
-- **Preamble Length:** 12
+### RX Gateway
+- Validates packets
+- Sends ACK
+- Detects duplicates
 
 ---
 
-## Validation Summary
+## 📦 Packet Structure
 
-During development, multiple issues were identified and solved:
+### DATA Packet
 
-- corrupted payload
-- communication instability
-- timeouts
-- hardware assembly issues
-- SPI initialization issues
-- ACK reception failure after transmission
-
-The final fix required forcing the SX1276 transceiver into **receive mode** after transmission before waiting for ACK. This solved the main communication reliability issue.
-
-After correction, the system successfully validated:
-
-- bidirectional LoRa communication
-- correct ACK reception
-- CRC validation
-- sequence progression
-- stable packet confirmation flow
+| Field | Description |
+|------|------------|
+| Magic Byte | Packet identifier |
+| Version | Protocol version |
+| Type | DATA |
+| Node ID | Sender ID |
+| Sequence | Packet number |
+| Length | Payload size |
+| Payload | Sensor data |
+| CRC16 | Integrity check |
 
 ---
 
-## Repository Structure
+### ACK Packet
 
-```text
+| Field | Description |
+|------|------------|
+| Magic Byte | Packet identifier |
+| Version | Protocol version |
+| Type | ACK |
+| Gateway ID | Receiver ID |
+| Sequence | Confirmed packet |
+| Status | OK |
+| CRC16 | Integrity check |
+
+---
+
+## ⚙️ LoRa Configuration
+
+- Frequency: **915 MHz**
+- Bandwidth: **500 kHz**
+- Spreading Factor: **7**
+- Coding Rate: **4/5**
+- Power: **2 dBm**
+- Preamble: **12**
+
+---
+
+## 🔍 Validation Results
+
+The system successfully validated:
+
+- Stable bidirectional communication
+- ACK reception after TX fix
+- Correct CRC validation
+- Sequence progression (0 → N)
+- Duplicate detection at receiver
+- Reliable packet confirmation
+
+A critical issue was identified and solved:
+
+> The SX1276 transceiver was not automatically switching from TX to RX mode.  
+> The solution required explicitly forcing RX mode before waiting for ACK.
+
+---
+
+## 📁 Project Structure
+
 esp32-lora-reliable-link/
-├── docs/
-│   └── lora-validation-report.md
-├── rx-gateway/
-│   ├── include/
-│   ├── src/
-│   ├── test/
-│   └── platformio.ini
 ├── tx-node/
-│   ├── include/
-│   ├── src/
-│   ├── test/
-│   └── platformio.ini
-└── README.md
-```
+├── rx-gateway/
+├── docs/
+│ └── lora-validation-report.md
 
-## Current Status
+---
 
-✅ LoRa link validated
-✅ ACK-based reliable communication working
-✅ Sequence progression validated
-✅ Duplicate detection implemented
+## 📊 Current Status
 
-## Author
+✅ Reliable LoRa link validated  
+✅ Protocol implemented and tested  
+✅ Clean TX/RX code  
+🔜 Next: real sensor integration + backend communication  
 
-Ruan Silveira
-Industrial Maintenance Technician
-Electrical Engineering Student
-Focus: Embedded Systems, IoT, Industrial Applications, Agro 4.0
+---
+
+## 🚀 Future Improvements
+
+- HX711 integration (weight)
+- Environmental sensors
+- Gateway → Backend (HTTP)
+- Dashboard integration
+- Field testing and optimization
+
+---
+
+## 👨‍💻 Author
+
+**Ruan Silveira**  
+Electrical Engineering Student  
+Industrial Maintenance Technician  
+
+Focus areas:
+- Embedded Systems
+- IoT
+- Industrial Automation
+- Agro 4.0
