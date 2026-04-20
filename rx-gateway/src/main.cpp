@@ -3,8 +3,6 @@
 #include <RadioLib.h>
 
 // ==========================
-// PINOS LoRa
-// ==========================
 #define LORA_SCK   5
 #define LORA_MISO  19
 #define LORA_MOSI  27
@@ -16,281 +14,137 @@ SPIClass spiLoRa(VSPI);
 SX1276 radio = new Module(LORA_CS, LORA_DIO0, LORA_RST, RADIOLIB_NC, spiLoRa);
 
 // ==========================
-// CONFIG PROTOCOLO
-// ==========================
-constexpr uint8_t MAGIC_BYTE      = 0xA5;
-constexpr uint8_t PROTO_VERSION   = 0x01;
-constexpr uint8_t MSG_TYPE_DATA   = 0x10;
-constexpr uint8_t MSG_TYPE_ACK    = 0x20;
+constexpr uint8_t MAGIC_BYTE    = 0xA5;
+constexpr uint8_t PROTO_VERSION = 0x01;
 
-constexpr uint8_t GATEWAY_ID      = 0xF0;
+constexpr uint8_t MSG_DATA = 0x10;
+constexpr uint8_t MSG_ACK  = 0x20;
 
-// ==========================
-// CONFIG LoRa
-// ==========================
-constexpr float LORA_FREQ_MHZ    = 915.0;
-constexpr float LORA_BW_KHZ      = 500.0;
-constexpr uint8_t LORA_SF        = 7;
-constexpr uint8_t LORA_CR        = 5;
-constexpr int8_t LORA_POWER_DBM  = 2;
-constexpr uint16_t LORA_PREAMBLE = 12;
+constexpr uint8_t GATEWAY_ID = 0xF0;
 
 // ==========================
-// PAYLOAD FIXO
-// ==========================
-struct SensorPayload {
-  int16_t temperatura_c_x100;
-  uint16_t umidade_x100;
-  int16_t peso_kg_x100;
-  uint16_t reserv;
+struct Payload {
+  int16_t temp;
+  uint16_t hum;
+  int16_t weight;
+  uint16_t reserved;
 };
 
 // ==========================
-// CONTROLE DE DUPLICIDADE
-// ==========================
-struct LastPacketControl {
-  bool valid = false;
-  uint8_t nodeId = 0;
-  uint8_t seq = 0;
-};
-
-LastPacketControl lastProcessed;
-
-// ==========================
-// CRC16-CCITT
-// ==========================
-uint16_t crc16_ccitt(const uint8_t* data, size_t len) {
+uint16_t crc16(const uint8_t* data, size_t len) {
   uint16_t crc = 0xFFFF;
   for (size_t i = 0; i < len; i++) {
     crc ^= (uint16_t)data[i] << 8;
     for (uint8_t b = 0; b < 8; b++) {
-      if (crc & 0x8000) {
-        crc = (crc << 1) ^ 0x1021;
-      } else {
-        crc <<= 1;
-      }
+      crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : crc << 1;
     }
   }
   return crc;
 }
 
 // ==========================
-// VALIDA PACOTE DATA
-// ==========================
-bool validateDataPacket(const uint8_t* buf, size_t len) {
+bool validPacket(uint8_t* buf, size_t len) {
   if (len < 8) return false;
 
-  uint16_t rxCrc = ((uint16_t)buf[len - 2] << 8) | buf[len - 1];
-  uint16_t calcCrc = crc16_ccitt(buf, len - 2);
+  uint16_t crc_rx = (buf[len - 2] << 8) | buf[len - 1];
+  uint16_t crc_calc = crc16(buf, len - 2);
 
-  if (rxCrc != calcCrc) return false;
-  if (buf[0] != MAGIC_BYTE) return false;
-  if (buf[1] != PROTO_VERSION) return false;
-  if (buf[2] != MSG_TYPE_DATA) return false;
-
-  uint8_t payloadLen = buf[5];
-  if (len != (size_t)(6 + payloadLen + 2)) return false;
-
-  return true;
+  return (
+    crc_rx == crc_calc &&
+    buf[0] == MAGIC_BYTE &&
+    buf[1] == PROTO_VERSION &&
+    buf[2] == MSG_DATA
+  );
 }
 
 // ==========================
-// MONTA ACK
-// ==========================
-size_t buildAckPacket(uint8_t seq, uint8_t* outBuf) {
-  size_t idx = 0;
+size_t buildAck(uint8_t seq, uint8_t* buf) {
+  size_t i = 0;
 
-  outBuf[idx++] = MAGIC_BYTE;
-  outBuf[idx++] = PROTO_VERSION;
-  outBuf[idx++] = MSG_TYPE_ACK;
-  outBuf[idx++] = GATEWAY_ID;
-  outBuf[idx++] = seq;
-  outBuf[idx++] = 0x00;   // status OK
+  buf[i++] = MAGIC_BYTE;
+  buf[i++] = PROTO_VERSION;
+  buf[i++] = MSG_ACK;
+  buf[i++] = GATEWAY_ID;
+  buf[i++] = seq;
+  buf[i++] = 0x00;
 
-  uint16_t crc = crc16_ccitt(outBuf, idx);
-  outBuf[idx++] = (crc >> 8) & 0xFF;
-  outBuf[idx++] = crc & 0xFF;
+  uint16_t crc = crc16(buf, i);
+  buf[i++] = crc >> 8;
+  buf[i++] = crc & 0xFF;
 
-  return idx;
+  return i;
 }
 
-// ==========================
-// RADIO
 // ==========================
 void initRadio() {
   spiLoRa.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
   delay(100);
 
-  int state = radio.begin();
-  if (state != RADIOLIB_ERR_NONE) {
-    Serial.print("Falha no begin: ");
-    Serial.println(state);
-    while (true) delay(1000);
+  if (radio.begin() != RADIOLIB_ERR_NONE) {
+    Serial.println("Erro init radio");
+    while (true);
   }
 
-  state = radio.setFrequency(LORA_FREQ_MHZ);
-  if (state != RADIOLIB_ERR_NONE) {
-    Serial.print("Falha setFrequency: ");
-    Serial.println(state);
-    while (true) delay(1000);
-  }
+  radio.setFrequency(915.0);
+  radio.setBandwidth(500.0);
+  radio.setSpreadingFactor(7);
+  radio.setCodingRate(5);
+  radio.setOutputPower(2);
+  radio.setPreambleLength(12);
 
-  state = radio.setBandwidth(LORA_BW_KHZ);
-  if (state != RADIOLIB_ERR_NONE) {
-    Serial.print("Falha setBandwidth: ");
-    Serial.println(state);
-    while (true) delay(1000);
-  }
-
-  state = radio.setSpreadingFactor(LORA_SF);
-  if (state != RADIOLIB_ERR_NONE) {
-    Serial.print("Falha setSpreadingFactor: ");
-    Serial.println(state);
-    while (true) delay(1000);
-  }
-
-  state = radio.setCodingRate(LORA_CR);
-  if (state != RADIOLIB_ERR_NONE) {
-    Serial.print("Falha setCodingRate: ");
-    Serial.println(state);
-    while (true) delay(1000);
-  }
-
-  state = radio.setOutputPower(LORA_POWER_DBM);
-  if (state != RADIOLIB_ERR_NONE) {
-    Serial.print("Falha setOutputPower: ");
-    Serial.println(state);
-    while (true) delay(1000);
-  }
-
-  state = radio.setPreambleLength(LORA_PREAMBLE);
-  if (state != RADIOLIB_ERR_NONE) {
-    Serial.print("Falha setPreambleLength: ");
-    Serial.println(state);
-    while (true) delay(1000);
-  }
-
-  Serial.println("Radio RX inicializado com sucesso.");
+  Serial.println("Radio RX OK");
 }
 
 // ==========================
-// DUPLICIDADE
-// ==========================
-bool isDuplicate(uint8_t nodeId, uint8_t seq) {
-  return lastProcessed.valid &&
-         lastProcessed.nodeId == nodeId &&
-         lastProcessed.seq == seq;
-}
+uint8_t lastSeq = 255;
 
-void markProcessed(uint8_t nodeId, uint8_t seq) {
-  lastProcessed.valid = true;
-  lastProcessed.nodeId = nodeId;
-  lastProcessed.seq = seq;
-}
-
-// ==========================
-// ENVIA ACK
-// ==========================
-void sendAck(uint8_t seq) {
-  uint8_t ackBuf[16];
-  size_t ackLen = buildAckPacket(seq, ackBuf);
-
-  int state = radio.transmit(ackBuf, ackLen);
-
-  Serial.print("[ACK TX] seq=");
-  Serial.print(seq);
-  Serial.print(" state=");
-  Serial.println(state);
-}
-
-// ==========================
-// PROCESSA DADOS
-// ==========================
-void processPacket(const SensorPayload& p, uint8_t nodeId, uint8_t seq, float rssi, float snr) {
-  float temperatura = p.temperatura_c_x100 / 100.0f;
-  float umidade = p.umidade_x100 / 100.0f;
-  float peso = p.peso_kg_x100 / 100.0f;
-
-  Serial.println("=========== PACOTE NOVO ===========");
-  Serial.print("nodeId: "); Serial.println(nodeId);
-  Serial.print("seq: "); Serial.println(seq);
-  Serial.print("temperatura: "); Serial.println(temperatura);
-  Serial.print("umidade: "); Serial.println(umidade);
-  Serial.print("peso: "); Serial.println(peso);
-  Serial.print("RSSI: "); Serial.println(rssi);
-  Serial.print("SNR: "); Serial.println(snr);
-  Serial.println("==================================");
-}
-
-// ==========================
-// SETUP
 // ==========================
 void setup() {
   Serial.begin(115200);
   delay(1500);
 
-  Serial.println();
-  Serial.println("=== GATEWAY RX ===");
-
+  Serial.println("=== RX GATEWAY ===");
   initRadio();
 }
 
 // ==========================
-// LOOP
-// ==========================
 void loop() {
-  uint8_t rxBuf[64];
-  memset(rxBuf, 0, sizeof(rxBuf));
+  uint8_t buf[64];
 
-  int state = radio.receive(rxBuf, sizeof(rxBuf), 1000);
+  int state = radio.receive(buf, sizeof(buf), 1000);
 
-  if (state == RADIOLIB_ERR_NONE) {
-    size_t len = radio.getPacketLength();
-    float rssi = radio.getRSSI();
-    float snr = radio.getSNR();
+  if (state != RADIOLIB_ERR_NONE) return;
 
-    Serial.print("[RX] len=");
-    Serial.print(len);
-    Serial.print(" RSSI=");
-    Serial.print(rssi);
-    Serial.print(" SNR=");
-    Serial.println(snr);
+  size_t len = radio.getPacketLength();
 
-    if (!validateDataPacket(rxBuf, len)) {
-      Serial.println("[RX] pacote invalido.");
-      return;
-    }
+  if (!validPacket(buf, len)) return;
 
-    uint8_t nodeId = rxBuf[3];
-    uint8_t seq = rxBuf[4];
-    uint8_t payloadLen = rxBuf[5];
-    
-    delay(60);   // ESSENCIAL
-    sendAck(seq);
+  uint8_t seq = buf[4];
 
-    if (isDuplicate(nodeId, seq)) {
-      Serial.print("[RX] pacote duplicado node=");
-      Serial.print(nodeId);
-      Serial.print(" seq=");
-      Serial.println(seq);
-      return;
-    }
+  delay(100);
 
-    if (payloadLen == sizeof(SensorPayload)) {
-      SensorPayload payload;
-      memcpy(&payload, &rxBuf[6], sizeof(SensorPayload));
+  uint8_t ack[16];
+  size_t ackLen = buildAck(seq, ack);
 
-      processPacket(payload, nodeId, seq, rssi, snr);
-      markProcessed(nodeId, seq);
-    } else {
-      Serial.print("[RX] payloadLen inesperado: ");
-      Serial.println(payloadLen);
-    }
+  radio.transmit(ack, ackLen);
 
-  } else if (state == RADIOLIB_ERR_RX_TIMEOUT) {
-    // timeout normal
-  } else {
-    Serial.print("[RX] erro receive: ");
-    Serial.println(state);
+  if (seq == lastSeq) {
+    Serial.print("DUP seq=");
+    Serial.println(seq);
+    return;
   }
+
+  lastSeq = seq;
+
+  Payload p;
+  memcpy(&p, &buf[6], sizeof(Payload));
+
+  Serial.print("RX seq=");
+  Serial.print(seq);
+  Serial.print(" temp=");
+  Serial.print(p.temp / 100.0);
+  Serial.print(" hum=");
+  Serial.print(p.hum / 100.0);
+  Serial.print(" weight=");
+  Serial.println(p.weight / 100.0);
 }
